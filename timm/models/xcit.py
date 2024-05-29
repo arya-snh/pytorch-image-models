@@ -73,7 +73,6 @@ def conv3x3(in_planes, out_planes, stride=1):
         nn.BatchNorm2d(out_planes)
     )
 
-
 class ConvPatchEmbed(nn.Module):
     """Image to Patch Embedding using multiple convolutional layers"""
 
@@ -95,6 +94,7 @@ class ConvPatchEmbed(nn.Module):
                 act_layer(),
                 conv3x3(embed_dim // 2, embed_dim, 2),
             )
+            self.patch_proj = copy.deepcopy(self.proj)
         elif patch_size == 8:
             self.proj = torch.nn.Sequential(
                 conv3x3(in_chans, embed_dim // 4, 2),
@@ -103,16 +103,34 @@ class ConvPatchEmbed(nn.Module):
                 act_layer(),
                 conv3x3(embed_dim // 2, embed_dim, 2),
             )
+            self.patch_proj = copy.deepcopy(self.proj)
         else:
             raise('For convolutional projection, patch size has to be in [8, 16]')
 
     def forward(self, x):
+
+        #  x - b , n , c
+        #  Dimension Re-factoring with patch size (16,16)
+        additional_patch = self.patch_proj(F.interpolate(x, size=(16, 16)))
+        additional_patch = additional_patch.flatten(2).transpose(1, 2)
+        # -------------
+
         x = self.proj(x)
+        # b, 384, 8, 8
         Hp, Wp = x.shape[2], x.shape[3]
         x = x.flatten(2).transpose(1, 2)  # (B, N, C)
+        # print(x.shape) -> 32, 64, 384
+        # 32, 64, 384
+        # 32, 1, 384
+
+        # -------------
+        x = torch.cat([x, additional_patch], dim=1)
+        # print(additional_patch.shape) 
+        # -> 32, 65, 384
+        # -------------
+
         return x, (Hp, Wp)
-
-
+        
 class LPI(nn.Module):
     """
     Local Patch Interaction module that allows explicit communication between tokens in 3x3 windows to augment the
