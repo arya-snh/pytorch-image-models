@@ -538,20 +538,31 @@ class Xcit(nn.Module):
     def forward_features(self, x):
         B = x.shape[0]
         # x is (B, N, C). (Hp, Hw) is (height in units of patches, width in units of patches)
-        x, (Hp, Wp) = self.patch_embed(x)
 
-        if self.pos_embed is not None:
+        # additional_patch, (Hpp, Wpp) = self.patch_embed(F.interpolate(x, size=(4, 4), mode='nearest'))
+        x, (Hp, Wp) = self.patch_embed(x)
+        # Dimension Re-factoring, manually modifying Hp, Wp
+        Hp, Wp = 13, 5
+
+        if self.use_pos_embed:
             # `pos_embed` (B, C, Hp, Wp), reshape -> (B, C, N), permute -> (B, N, C)
             pos_encoding = self.pos_embed(B, Hp, Wp).reshape(B, -1, x.shape[1]).permute(0, 2, 1)
+            # pos_encoding_additional_patch = self.pos_embed(B, Hpp, Wpp).reshape(B, -1, additional_patch.shape[1]).permute(0, 2, 1)
             x = x + pos_encoding
+            # additional_patch = additional_patch + pos_encoding_additional_patch
+
         x = self.pos_drop(x)
 
         for blk in self.blocks:
             if self.grad_checkpointing and not torch.jit.is_scripting():
                 x = checkpoint(blk, x, Hp, Wp)
             else:
+                # Here
+                # additional_patch = blk(additional_patch, Hpp, Wpp)
                 x = blk(x, Hp, Wp)
-
+                
+        # x = torch.cat([x, additional_patch], dim=1)
+        
         x = torch.cat((self.cls_token.expand(B, -1, -1), x), dim=1)
 
         for blk in self.cls_attn_blocks:
@@ -566,7 +577,6 @@ class Xcit(nn.Module):
     def forward_head(self, x, pre_logits: bool = False):
         if self.global_pool:
             x = x[:, 1:].mean(dim=1) if self.global_pool == 'avg' else x[:, 0]
-        x = self.head_drop(x)
         return x if pre_logits else self.head(x)
 
     def forward(self, x):
