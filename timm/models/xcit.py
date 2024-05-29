@@ -233,6 +233,22 @@ class XCA(nn.Module):
             x = attn @ v
 
         x = x.permute(0, 3, 1, 2).reshape(B, N, C)
+
+        cross_attn = []
+        for i in range(self.num_heads):
+            # Query from head 'i', Keys and Values from head (i+1) % num_heads
+            next_head = (i + 1) % self.num_heads
+            attn = (q[:, i, :, :] @ k[:, next_head, :, :].transpose(-2, -1)) * self.temperature[i]
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+
+            # Apply attention to Values of the next head
+            head_x = (attn @ v[:, next_head, :, :]).transpose(1, 2).reshape(B, N, C // self.num_heads)
+            cross_attn.append(head_x)
+
+        # Concatenate the outputs from all heads and apply the final projection
+        x = x + torch.cat(cross_attn, dim=-1)
+        
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
