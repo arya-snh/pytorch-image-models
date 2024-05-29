@@ -213,6 +213,9 @@ class XCA(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+        self.ema_alpha = 0.99996  # EMA smoothing factor
+        self.ema_matrix = None
+
     def forward(self, x):
         B, N, C = x.shape
         # Result of next line is (qkv, B, num (H)eads,  (C')hannels per head, N)
@@ -228,6 +231,16 @@ class XCA(nn.Module):
             q = torch.nn.functional.normalize(q, dim=-1)
             k = torch.nn.functional.normalize(k, dim=-1)
             attn = (q @ k.transpose(-2, -1)) * self.temperature
+
+            if self.ema_matrix is None:
+                # Initialize EMA with the first batch
+                ema_matrix = attn.clone()
+            else:
+                # Update EMA with the new batch
+                ema_matrix = ema_matrix * (1 - self.ema_alpha) + attn * self.ema_alpha
+    
+            attn = ema_matrix
+            
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = attn @ v
